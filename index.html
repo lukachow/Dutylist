@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>智能編更系統 Pro 2.1 - 快速重設版</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --d2: #e0f2fe;
+            --d7: #f0fdf4;
+            --call: #fef3c7;
+            --no-call: #fee2e2;
+            --off: #f1f5f9;
+        }
+        body { font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; background: var(--bg); color: var(--text); margin: 20px; }
+        .container { max-width: 1600px; margin: auto; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+        
+        header { border-bottom: 2px solid #f1f5f9; padding-bottom: 15px; margin-bottom: 20px; }
+        h1 { color: var(--primary); margin: 0; font-size: 1.6rem; }
+
+        .setup-steps { display: flex; gap: 15px; margin-bottom: 20px; }
+        .step { flex: 1; background: #fff; border: 2px solid #e2e8f0; padding: 12px; border-radius: 10px; font-size: 0.9rem; }
+        .step.active { border-color: var(--primary); background: #eff6ff; }
+        
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; background: #f1f5f9; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        input, button { padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; }
+        
+        .btn-group { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+        button { cursor: pointer; border: none; font-weight: 600; transition: 0.2s; }
+        
+        .btn-init { background: #64748b; color: white; }
+        .btn-clear { background: #94a3b8; color: white; } /* 清除按鈕顏色 */
+        .btn-gen { background: var(--primary); color: white; }
+        .btn-csv { background: #10b981; color: white; }
+        
+        button:hover { opacity: 0.9; transform: translateY(-1px); }
+
+        .table-wrapper { overflow-x: auto; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px; }
+        table { border-collapse: collapse; width: 100%; min-width: 1200px; }
+        th, td { border: 1px solid #e2e8f0; padding: 10px 2px; text-align: center; cursor: pointer; user-select: none; }
+        th { background: #f8fafc; font-size: 12px; height: 40px; }
+        
+        .duty-D2 { background-color: var(--d2); color: #0369a1; }
+        .duty-D7 { background-color: var(--d7); color: #15803d; }
+        .duty-C, .duty-C1, .duty-C2 { background-color: var(--call); color: #92400e; font-weight: bold; }
+        .duty-OFF { background-color: var(--off); color: #94a3b8; }
+        .duty-NOCALL { background-color: var(--no-call); color: #dc2626; font-size: 10px; font-weight: bold; }
+        .holiday { color: #ef4444; background-color: #fef2f2 !important; }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+        .stat-card { background: #fff; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 13px; }
+        .stat-card strong { color: var(--primary); border-bottom: 1px solid #f1f5f9; display: block; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>🗓️ 智能編更系統 Pro 2.1</h1>
+    </header>
+
+    <div class="setup-steps">
+        <div class="step">1. 設定月份與名單後「初始化」</div>
+        <div class="step">2. 點擊表格標記 NOCALL (禁區)</div>
+        <div class="step">3. 點擊「自動生成」完成排班</div>
+    </div>
+    
+    <div class="controls">
+        <div class="input-group">
+            <label>月份</label>
+            <input type="month" id="monthInput" value="2026-05">
+        </div>
+        <div class="input-group" style="flex: 2;">
+            <label>員工名單</label>
+            <input type="text" id="staffInput" value="員工A, 員工B, 員工C, 員工D, 員工E, 員工F, 員工G, 員工H, 員工I, 員工J">
+        </div>
+        <div class="btn-group">
+            <button class="btn-init" onclick="initTable()">初始化</button>
+            <button class="btn-clear" onclick="clearAllNoCalls()">清空禁區</button>
+            <button class="btn-gen" onclick="generateSchedule()">自動生成</button>
+            <button class="btn-csv" onclick="exportToCSV()">匯出 CSV</button>
+        </div>
+    </div>
+
+    <div class="table-wrapper" id="tableContainer">
+        <p style="text-align:center; padding: 40px; color: #94a3b8;">請先點擊「初始化」來產生表格...</p>
+    </div>
+    
+    <div id="statsContainer" class="stats-grid"></div>
+</div>
+
+<script>
+const HK_HOLIDAYS = ["2026-01-01", "2026-02-17", "2026-02-18", "2026-02-19", "2026-04-03", "2026-04-04", "2026-04-06", "2026-05-01", "2026-05-22", "2026-06-19", "2026-07-01", "2026-10-01", "2026-10-16", "2026-12-25", "2026-12-26"];
+
+let staffList = [];
+let daysInMonth = 0;
+let currentYear, currentMonth;
+let cellData = {}; 
+
+function isHoliday(dateStr) { return HK_HOLIDAYS.includes(dateStr); }
+
+function initTable() {
+    const monthVal = document.getElementById('monthInput').value;
+    if(!monthVal) return alert("請選擇月份");
+    [currentYear, currentMonth] = monthVal.split('-').map(Number);
+    staffList = document.getElementById('staffInput').value.split(',').map(s => s.trim()).filter(s => s !== "");
+    daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+    
+    cellData = {};
+    staffList.forEach(s => {
+        cellData[s] = {};
+        for(let d=1; d<=daysInMonth; d++) cellData[s][d] = ""; 
+    });
+    renderUI();
+}
+
+// 【新功能】清空所有標記為 NOCALL 的格子
+function clearAllNoCalls() {
+    if(!staffList.length) return;
+    if(!confirm("確定要清空所有已設定的禁區 (NO CALL) 嗎？")) return;
+    
+    staffList.forEach(s => {
+        for(let d=1; d<=daysInMonth; d++) {
+            if(cellData[s][d] === "NOCALL") cellData[s][d] = "";
+        }
+    });
+    renderUI();
+}
+
+function toggleNoCall(s, d) {
+    // 只有在還沒生成更表或者是 NOCALL 的情況下才允許切換
+    const current = cellData[s][d];
+    if (current === "" || current === "NOCALL") {
+        cellData[s][d] = (current === "NOCALL") ? "" : "NOCALL";
+        renderUI();
+    } else {
+        // 如果已經有班，點擊則重設該格為空，方便手動微調後重新標記
+        cellData[s][d] = "";
+        renderUI();
+    }
+}
+
+function renderUI(stats = null) {
+    if(!staffList.length) return;
+    let html = `<table><tr><th style="width:80px;">員工</th>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+        let dateObj = new Date(currentYear, currentMonth-1, d);
+        let dayName = ['日','一','二','三','四','五','六'][dateObj.getDay()];
+        let isH = isHoliday(`${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`) || dateObj.getDay() === 0 || dateObj.getDay() === 6;
+        html += `<th class="${isH?'holiday':''}">${d}<br>${dayName}</th>`;
+    }
+    html += `</tr>`;
+
+    staffList.forEach(s => {
+        html += `<tr><td><strong>${s}</strong></td>`;
+        for (let d = 1; d <= daysInMonth; d++) {
+            let status = cellData[s][d];
+            let display = status === "NOCALL" ? "🚫" : status;
+            html += `<td class="duty-${status}" onclick="toggleNoCall('${s}', ${d})">${display}</td>`;
+        }
+        html += `</tr>`;
+    });
+    html += `</table>`;
+    document.getElementById('tableContainer').innerHTML = html;
+
+    if (stats) {
+        let statsHtml = "";
+        staffList.forEach(s => {
+            statsHtml += `<div class="stat-card"><strong>👤 ${s}</strong>
+            Call: ${stats[s].totalCall} | 二四: ${stats[s].TueThuCall}<br>
+            假日: ${stats[s].C1C2} | D7: ${stats[s].D7}</div>`;
+        });
+        document.getElementById('statsContainer').innerHTML = statsHtml;
+    }
+}
+
+function generateSchedule() {
+    if (!staffList.length) return alert("請先初始化表格");
+    
+    let stats = {};
+    let lastCallDay = {};
+    staffList.forEach(s => {
+        stats[s] = { totalCall: 0, TueThuCall: 0, C1C2: 0, D7: 0 };
+        lastCallDay[s] = -10;
+        for(let d=1; d<=daysInMonth; d++) {
+            if(cellData[s][d] !== "NOCALL") cellData[s][d] = "";
+        }
+    });
+
+    for (let d = 1; d <= daysInMonth; d++) {
+        let dateObj = new Date(currentYear, currentMonth - 1, d);
+        let dateStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        let dayOfWeek = dateObj.getDay(); 
+        let isSpecial = (dayOfWeek === 0 || dayOfWeek === 6 || isHoliday(dateStr));
+        let isTueThu = (dayOfWeek === 2 || dayOfWeek === 4);
+
+        let getPriority = (s) => {
+            if (cellData[s][d] === "NOCALL") return -2000;
+            let gap = d - lastCallDay[s];
+            if (gap < 4) return -1000;
+            return (gap > 7) ? gap * 50 : gap * 5;
+        };
+
+        if (isSpecial) {
+            let avail = staffList.filter(s => getPriority(s) > 0 && stats[s].C1C2 < 2)
+                        .sort((a, b) => getPriority(b) - getPriority(a) || stats[a].totalCall - stats[b].totalCall);
+            for (let i = 0; i < 2 && i < avail.length; i++) {
+                let s = avail[i];
+                cellData[s][d] = (i === 0) ? 'C1' : 'C2';
+                stats[s].C1C2++; stats[s].totalCall++; lastCallDay[s] = d;
+            }
+            staffList.forEach(s => { if (!['C1','C2'].includes(cellData[s][d])) cellData[s][d] = (cellData[s][d] === "NOCALL") ? "NOCALL" : "OFF"; });
+        } else {
+            let avail = staffList.filter(s => getPriority(s) > 0)
+                        .sort((a, b) => {
+                            let scoreA = getPriority(a) + (isTueThu ? (5 - stats[a].TueThuCall) * 10 : 0);
+                            let scoreB = getPriority(b) + (isTueThu ? (5 - stats[b].TueThuCall) * 10 : 0);
+                            return scoreB - scoreA || stats[a].totalCall - stats[b].totalCall;
+                        });
+
+            if (avail.length > 0) {
+                let s = avail[0];
+                cellData[s][d] = 'C';
+                stats[s].totalCall++;
+                if (isTueThu) stats[s].TueThuCall++;
+                lastCallDay[s] = d;
+            }
+
+            let remaining = staffList.filter(s => !['C','C1','C2','OFF'].includes(cellData[s][d]))
+                                    .sort((a, b) => stats[a].D7 - stats[b].D7 || Math.random() - 0.5);
+            for (let i = 0; i < 4 && i < remaining.length; i++) {
+                let s = remaining[i];
+                cellData[s][d] = 'D7';
+                stats[s].D7++;
+            }
+            staffList.forEach(s => { 
+                if (!['C','C1','C2','D7','OFF'].includes(cellData[s][d])) cellData[s][d] = (cellData[s][d] === "NOCALL") ? "NOCALL" : "D2"; 
+            });
+        }
+    }
+    renderUI(stats);
+}
+
+function exportToCSV() {
+    if(!staffList.length) return;
+    let csvContent = "\ufeff員工/日期,";
+    for (let d = 1; d <= daysInMonth; d++) csvContent += `${currentMonth}/${d},`;
+    csvContent += "\n";
+    staffList.forEach(s => {
+        csvContent += `${s},`;
+        for(let d=1; d<=daysInMonth; d++) csvContent += `${cellData[s][d]},`;
+        csvContent += "\n";
+    });
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `Duty_Roster_${currentYear}_${currentMonth}.csv`;
+    link.click();
+}
+</script>
+</body>
+</html>
