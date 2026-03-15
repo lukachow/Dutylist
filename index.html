@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>自動編更系統</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background: #f4f7f6; }
+        h2 { color: #333; }
+        .controls { margin-bottom: 20px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        table { border-collapse: collapse; width: 100%; background: white; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 13px; }
+        th { background-color: #4CAF50; color: white; position: sticky; top: 0; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .duty-C1, .duty-C2 { background-color: #ffcccc; font-weight: bold; }
+        .duty-C { background-color: #fff3cd; }
+        .duty-D7 { background-color: #d1ecf1; }
+        .stats { margin-top: 20px; background: white; padding: 15px; }
+    </style>
+</head>
+<body>
+
+    <h2>編更表產生器</h2>
+    
+    <div class="controls">
+        月份：<input type="month" id="monthInput">
+        員工名單 (用逗號隔開)：<br>
+        <input type="text" id="staffInput" value="員工A, 員工B, 員工C, 員工D, 員工E, 員工F, 員工G, 員工H, 員工I, 員工J" style="width: 80%; margin: 10px 0;">
+        <br>
+        <button onclick="generateSchedule()">產生隨機排更</button>
+    </div>
+
+    <div id="tableContainer"></div>
+    <div id="statsContainer" class="stats"></div>
+
+    <script>
+        function generateSchedule() {
+            const monthVal = document.getElementById('monthInput').value;
+            if (!monthVal) return alert("請選擇月份");
+            
+            const [year, month] = monthVal.split('-').map(Number);
+            const staff = document.getElementById('staffInput').value.split(',').map(s => s.trim());
+            const daysInMonth = new Date(year, month, 0).getDate();
+            
+            // 初始化數據結構
+            let schedule = {}; 
+            let stats = {};
+            staff.forEach(s => {
+                schedule[s] = {};
+                stats[s] = { C1C2: 0, D7: 0 };
+            });
+
+            for (let d = 1; d <= daysInMonth; d++) {
+                let date = new Date(year, month - 1, d);
+                let dayOfWeek = date.getDay(); // 0 是周日, 6 是周六
+                let availableStaff = [...staff].sort(() => Math.random() - 0.5);
+
+                if (dayOfWeek === 0 || dayOfWeek === 6) {
+                    // 周六日：1個C1, 1個C2
+                    let assigned = 0;
+                    for (let s of availableStaff) {
+                        if (stats[s].C1C2 < 2 && assigned < 2) {
+                            let duty = (assigned === 0) ? 'C1' : 'C2';
+                            schedule[s][d] = duty;
+                            stats[s].C1C2++;
+                            assigned++;
+                        } else {
+                            schedule[s][d] = 'OFF';
+                        }
+                    }
+                } else {
+                    // 周一至五：1個C, 4個D7, 餘下D2
+                    // 優先選 D7 累積最少的人
+                    availableStaff.sort((a, b) => stats[a].D7 - stats[b].D7);
+                    
+                    schedule[availableStaff[0]][d] = 'C';
+                    for (let i = 1; i <= 4; i++) {
+                        schedule[availableStaff[i]][d] = 'D7';
+                        stats[availableStaff[i]].D7++;
+                    }
+                    for (let i = 5; i < availableStaff.length; i++) {
+                        schedule[availableStaff[i]][d] = 'D2';
+                    }
+                }
+            }
+            renderTable(year, month, daysInMonth, staff, schedule, stats);
+        }
+
+        function renderTable(year, month, daysInMonth, staff, schedule, stats) {
+            let html = `<table><tr><th>員工 \\ 日期</th>`;
+            for (let d = 1; d <= daysInMonth; d++) {
+                let day = new Date(year, month-1, d).getDay();
+                let dayName = ['日','一','二','三','四','五','六'][day];
+                html += `<th>${d}<br>(${dayName})</th>`;
+            }
+            html += `</tr>`;
+
+            staff.forEach(s => {
+                html += `<tr><td><strong>${s}</strong></td>`;
+                for (let d = 1; d <= daysInMonth; d++) {
+                    let duty = schedule[s][d] || '-';
+                    html += `<td class="duty-${duty}">${duty}</td>`;
+                }
+                html += `</tr>`;
+            });
+            html += `</table>`;
+            document.getElementById('tableContainer').innerHTML = html;
+
+            let statsHtml = `<h3>本月統計 (平衡檢查)</h3><ul>`;
+            staff.forEach(s => {
+                statsHtml += `<li>${s}: D7次數(${stats[s].D7}), C1/C2總數(${stats[s].C1C2})</li>`;
+            });
+            statsHtml += `</ul>`;
+            document.getElementById('statsContainer').innerHTML = statsHtml;
+        }
+    </script>
+</body>
+</html>
