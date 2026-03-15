@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>智能編更系統 Pro - 嚴格間隔版</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --d2: #e0f2fe; /* 淺藍 */
+            --d7: #f0fdf4; /* 淺綠 */
+            --call: #fef3c7; /* 淺黃 */
+            --off: #f1f5f9; /* 灰色 */
+        }
+        body { font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; background: var(--bg); color: var(--text); margin: 20px; }
+        .container { max-width: 1500px; margin: auto; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+        
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 25px; }
+        h1 { font-size: 1.5rem; margin: 0; color: var(--primary); }
+
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; background: #f1f5f9; padding: 20px; border-radius: 12px; margin-bottom: 30px; }
+        .input-group { display: flex; flex-direction: column; gap: 8px; }
+        input, button { padding: 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; }
+        
+        .btn-group { display: flex; gap: 10px; align-items: flex-end; }
+        button { cursor: pointer; border: none; font-weight: 600; transition: all 0.2s; }
+        .btn-gen { background: var(--primary); color: white; }
+        .btn-gen:hover { background: #1d4ed8; transform: translateY(-1px); }
+        .btn-csv { background: #10b981; color: white; }
+        .btn-csv:hover { background: #059669; }
+
+        .table-wrapper { overflow-x: auto; border-radius: 12px; border: 1px solid #e2e8f0; }
+        table { border-collapse: collapse; width: 100%; min-width: 1200px; background: white; }
+        th, td { border: 1px solid #e2e8f0; padding: 12px 4px; text-align: center; }
+        th { background: #f8fafc; font-size: 12px; font-weight: 600; }
+        
+        /* 顏色標記 */
+        .duty-D2 { background-color: var(--d2); color: #0369a1; }
+        .duty-D7 { background-color: var(--d7); color: #15803d; }
+        .duty-C, .duty-C1, .duty-C2 { background-color: var(--call); color: #92400e; font-weight: bold; border: 1px solid #fcd34d !important; }
+        .duty-OFF { background-color: var(--off); color: #94a3b8; font-size: 11px; }
+        .holiday { color: #ef4444; background-color: #fef2f2 !important; }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; margin-top: 30px; }
+        .stat-card { background: white; padding: 15px; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .stat-card strong { color: var(--primary); display: block; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; padding-bottom: 5px; }
+        .stat-val { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>🗓️ 智能排班系統 Pro</h1>
+        <div id="statusTag" style="font-size: 12px; color: #64748b;">Ready to Generate</div>
+    </header>
+    
+    <div class="controls">
+        <div class="input-group">
+            <label>選擇月份</label>
+            <input type="month" id="monthInput" value="2026-05">
+        </div>
+        <div class="input-group">
+            <label>員工名單 (逗號隔開)</label>
+            <input type="text" id="staffInput" value="陳大文, 張小明, 李華, 王強, 趙敏, 孫悟空, 周杰, 林嘉, 郭富, 劉德">
+        </div>
+        <div class="btn-group">
+            <button class="btn-gen" onclick="generateSchedule()">🎲 自動編更</button>
+            <button class="btn-csv" onclick="exportToCSV()">📥 匯出 Excel (CSV)</button>
+        </div>
+    </div>
+
+    <div class="table-wrapper" id="tableContainer"></div>
+    
+    <h3 style="margin-top:40px; color:#64748b;">📊 規則平衡度檢查</h3>
+    <div id="statsContainer" class="stats-grid"></div>
+</div>
+
+<script>
+const HK_HOLIDAYS = ["2026-01-01", "2026-02-17", "2026-02-18", "2026-02-19", "2026-04-03", "2026-04-04", "2026-04-06", "2026-05-01", "2026-05-22", "2026-06-19", "2026-07-01", "2026-10-01", "2026-10-16", "2026-12-25", "2026-12-26"];
+
+let currentSchedule = { staff: [], days: 0, data: {}, year: 0, month: 0 };
+
+function isHoliday(dateStr) { return HK_HOLIDAYS.includes(dateStr); }
+
+function generateSchedule() {
+    const monthVal = document.getElementById('monthInput').value;
+    const [year, month] = monthVal.split('-').map(Number);
+    const staff = document.getElementById('staffInput').value.split(',').map(s => s.trim());
+    const daysInMonth = new Date(year, month, 0).getDate();
+    
+    let schedule = {}; 
+    let stats = {};
+    let lastCallDay = {};
+
+    staff.forEach(s => {
+        schedule[s] = {};
+        stats[s] = { totalCall: 0, TueThuCall: 0, C1C2: 0, D7: 0 };
+        lastCallDay[s] = -10; // 初始化冷卻期
+    });
+
+    for (let d = 1; d <= daysInMonth; d++) {
+        let dateObj = new Date(year, month - 1, d);
+        let dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        let dayOfWeek = dateObj.getDay(); 
+        let isSpecial = (dayOfWeek === 0 || dayOfWeek === 6 || isHoliday(dateStr));
+        let isTueThu = (dayOfWeek === 2 || dayOfWeek === 4);
+
+        // 規則：3-7日限制
+        // 評分機制：距離上次 Call 越久，分數越高；超過 7 日強制最高分
+        let getCallPriority = (s) => {
+            let gap = d - lastCallDay[s];
+            if (gap < 4) return -1000; // 硬性間隔：不足3日排除
+            let score = gap * 10; // 越久沒 Call 分數越高
+            if (gap > 7) score += 500; // 超過7日強制拉高權重
+            return score;
+        };
+
+        if (isSpecial) {
+            let avail = staff.filter(s => getCallPriority(s) > 0 && stats[s].C1C2 < 2)
+                        .sort((a, b) => getCallPriority(b) - getCallPriority(a) || stats[a].totalCall - stats[b].totalCall);
+            
+            for (let i = 0; i < 2 && i < avail.length; i++) {
+                let s = avail[i];
+                let type = (i === 0) ? 'C1' : 'C2';
+                schedule[s][d] = type;
+                stats[s].C1C2++; stats[s].totalCall++; lastCallDay[s] = d;
+            }
+            staff.forEach(s => { if (!schedule[s][d]) schedule[s][d] = 'OFF'; });
+        } else {
+            let avail = staff.filter(s => getCallPriority(s) > 0)
+                        .sort((a, b) => {
+                            let scoreA = getCallPriority(a) + (isTueThu ? (10 - stats[a].TueThuCall) * 5 : 0);
+                            let scoreB = getCallPriority(b) + (isTueThu ? (10 - stats[b].TueThuCall) * 5 : 0);
+                            return scoreB - scoreA || stats[a].totalCall - stats[b].totalCall;
+                        });
+
+            if (avail.length > 0) {
+                let caller = avail[0];
+                schedule[caller][d] = 'C';
+                stats[caller].totalCall++;
+                if (isTueThu) stats[caller].TueThuCall++;
+                lastCallDay[caller] = d;
+            }
+
+            let remaining = staff.filter(s => !schedule[s][d]).sort((a, b) => stats[a].D7 - stats[b].D7 || Math.random() - 0.5);
+            for (let i = 0; i < 4 && i < remaining.length; i++) {
+                schedule[remaining[i]][d] = 'D7';
+                stats[remaining[i]].D7++;
+            }
+            staff.forEach(s => { if (!schedule[s][d]) schedule[s][d] = 'D2'; });
+        }
+    }
+    currentSchedule = { staff, days: daysInMonth, data: schedule, year, month };
+    renderTable(stats);
+}
+
+function renderTable(stats) {
+    const { staff, days, data, year, month } = currentSchedule;
+    let html = `<table><tr><th style="width:100px;">員工</th>`;
+    for (let d = 1; d <= days; d++) {
+        let dateObj = new Date(year, month-1, d);
+        let dayName = ['日','一','二','三','四','五','六'][dateObj.getDay()];
+        let isH = isHoliday(`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`) || dateObj.getDay() === 0 || dateObj.getDay() === 6;
+        html += `<th class="${isH?'holiday':''}">${d}<br>${dayName}</th>`;
+    }
+    html += `</tr>`;
+    staff.forEach(s => {
+        html += `<tr><td><strong>${s}</strong></td>`;
+        for (let d = 1; d <= days; d++) {
+            let duty = data[s][d];
+            html += `<td class="duty-${duty}">${duty}</td>`;
+        }
+        html += `</tr>`;
+    });
+    html += `</table>`;
+    document.getElementById('tableContainer').innerHTML = html;
+
+    let statsHtml = "";
+    staff.forEach(s => {
+        statsHtml += `<div class="stat-card"><strong>👤 ${s}</strong>
+            <div class="stat-val"><span>總 Call 數:</span> <b>${stats[s].totalCall}</b></div>
+            <div class="stat-val"><span>二四 Call:</span> <b>${stats[s].TueThuCall}</b></div>
+            <div class="stat-val"><span>D7 總數:</span> <b>${stats[s].D7}</b></div>
+            <div class="stat-val"><span>假日(C1C2):</span> <b>${stats[s].C1C2}</b></div>
+        </div>`;
+    });
+    document.getElementById('statsContainer').innerHTML = statsHtml;
+}
+
+function exportToCSV() {
+    const { staff, days, data, year, month } = currentSchedule;
+    if (!staff.length) return alert("請先產生更表");
+    let csvContent = "\ufeff員工/日期,";
+    for (let d = 1; d <= days; d++) csvContent += `${month}/${d},`;
+    csvContent += "\n";
+    staff.forEach(s => {
+        csvContent += `${s},` + Object.values(data[s]).join(",") + "\n";
+    });
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Duty_Roster_${year}_${month}.csv`;
+    link.click();
+}
+</script>
+</body>
+</html>
