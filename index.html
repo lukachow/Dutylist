@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>HK 智能編更系統 Pro - 支援 Excel 匯出</title>
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 1400px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h2 { color: #2c3e50; border-bottom: 3px solid #4CAF50; padding-bottom: 10px; margin-top: 0; }
+        .controls { margin-bottom: 20px; padding: 20px; background: #eef2f3; border-radius: 8px; border-left: 5px solid #4CAF50; }
+        input, button { padding: 10px; margin: 5px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; }
+        button { background: #4CAF50; color: white; cursor: pointer; border: none; font-weight: bold; }
+        button:hover { background: #388E3C; }
+        .btn-export { background: #2196F3; }
+        .btn-export:hover { background: #1976D2; }
+        .table-wrapper { overflow-x: auto; margin-top: 20px; border: 1px solid #ddd; }
+        table { border-collapse: collapse; width: 100%; min-width: 1000px; }
+        th, td { border: 1px solid #dee2e6; padding: 10px 5px; text-align: center; }
+        th { background: #4CAF50; color: white; font-size: 12px; }
+        .holiday { background-color: #ffebee !important; color: #d32f2f; font-weight: bold; }
+        .duty-C, .duty-C1, .duty-C2 { background-color: #fff3cd; font-weight: bold; color: #856404; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px; margin-top: 25px; }
+        .stat-card { background: #f8f9fa; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>HK 智能編更系統 (Excel 匯出版)</h2>
+    
+    <div class="controls">
+        <strong>1. 選擇月份：</strong> <input type="month" id="monthInput" value="2025-05">
+        <br><strong>2. 員工名單：</strong><br>
+        <input type="text" id="staffInput" value="員工1, 員工2, 員工3, 員工4, 員工5, 員工6, 員工7, 員工8, 員工9, 員工10" style="width: 95%;">
+        <br>
+        <button onclick="generateSchedule()">🎲 產生新更表</button>
+        <button class="btn-export" onclick="exportToCSV()">📥 下載 CSV (Excel)</button>
+    </div>
+
+    <div class="table-wrapper" id="tableContainer"></div>
+    <h3>📊 平衡統計檢查</h3>
+    <div id="statsContainer" class="stats-grid"></div>
+</div>
+
+<script>
+// 公眾假期清單 (2025)
+const HK_HOLIDAYS = ["2025-01-01", "2025-01-29", "2025-01-30", "2025-01-31", "2025-04-04", "2025-04-18", "2025-04-19", "2025-04-21", "2025-05-01", "2025-05-05", "2025-05-31", "2025-07-01", "2025-10-01", "2025-10-07", "2025-10-29", "2025-12-25", "2025-12-26"];
+
+let currentSchedule = { staff: [], days: 0, data: {}, year: 0, month: 0 };
+
+function isHoliday(dateStr) { return HK_HOLIDAYS.includes(dateStr); }
+
+function generateSchedule() {
+    const monthVal = document.getElementById('monthInput').value;
+    const [year, month] = monthVal.split('-').map(Number);
+    const staff = document.getElementById('staffInput').value.split(',').map(s => s.trim());
+    const daysInMonth = new Date(year, month, 0).getDate();
+    
+    let schedule = {}; 
+    let stats = {};
+    let lastCallDay = {};
+
+    staff.forEach(s => {
+        schedule[s] = {};
+        stats[s] = { totalCall: 0, TueThuCall: 0, C1C2: 0, D7: 0 };
+        lastCallDay[s] = -10;
+    });
+
+    for (let d = 1; d <= daysInMonth; d++) {
+        let dateObj = new Date(year, month - 1, d);
+        let dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        let dayOfWeek = dateObj.getDay(); 
+        let isSpecial = (dayOfWeek === 0 || dayOfWeek === 6 || isHoliday(dateStr));
+        let isTueThu = (dayOfWeek === 2 || dayOfWeek === 4);
+
+        let getAvailable = () => staff.filter(s => (d - lastCallDay[s]) >= 4);
+
+        if (isSpecial) {
+            let avail = getAvailable().filter(s => stats[s].C1C2 < 2)
+                        .sort((a, b) => stats[a].totalCall - stats[b].totalCall || Math.random() - 0.5);
+            for (let i = 0; i < 2 && i < avail.length; i++) {
+                let s = avail[i];
+                let type = (i === 0) ? 'C1' : 'C2';
+                schedule[s][d] = type;
+                stats[s].C1C2++; stats[s].totalCall++; lastCallDay[s] = d;
+            }
+            staff.forEach(s => { if (!schedule[s][d]) schedule[s][d] = 'OFF'; });
+        } else {
+            let avail = getAvailable().sort((a, b) => {
+                if (isTueThu && stats[a].TueThuCall !== stats[b].TueThuCall) return stats[a].TueThuCall - stats[b].TueThuCall;
+                return stats[a].totalCall - stats[b].totalCall || Math.random() - 0.5;
+            });
+            if (avail.length > 0) {
+                let caller = avail[0];
+                schedule[caller][d] = 'C';
+                stats[caller].totalCall++;
+                if (isTueThu) stats[caller].TueThuCall++;
+                lastCallDay[caller] = d;
+            }
+            let remaining = staff.filter(s => !schedule[s][d]).sort((a, b) => stats[a].D7 - stats[b].D7 || Math.random() - 0.5);
+            for (let i = 0; i < 4 && i < remaining.length; i++) {
+                schedule[remaining[i]][d] = 'D7';
+                stats[remaining[i]].D7++;
+            }
+            staff.forEach(s => { if (!schedule[s][d]) schedule[s][d] = 'D2'; });
+        }
+    }
+    currentSchedule = { staff, days: daysInMonth, data: schedule, year, month };
+    renderTable(stats);
+}
+
+function renderTable(stats) {
+    const { staff, days, data, year, month } = currentSchedule;
+    let html = `<table><tr><th>員工 \\ 日期</th>`;
+    for (let d = 1; d <= days; d++) {
+        let day = new Date(year, month-1, d).getDay();
+        let dayName = ['日','一','二','三','四','五','六'][day];
+        html += `<th>${d}<br>${dayName}</th>`;
+    }
+    html += `</tr>`;
+    staff.forEach(s => {
+        html += `<tr><td><strong>${s}</strong></td>`;
+        for (let d = 1; d <= days; d++) {
+            let duty = data[s][d];
+            html += `<td class="duty-${duty}">${duty}</td>`;
+        }
+        html += `</tr>`;
+    });
+    html += `</table>`;
+    document.getElementById('tableContainer').innerHTML = html;
+
+    let statsHtml = "";
+    staff.forEach(s => {
+        statsHtml += `<div class="stat-card"><strong>${s}</strong>總 Call: ${stats[s].totalCall} | 二四: ${stats[s].TueThuCall} | D7: ${stats[s].D7}</div>`;
+    });
+    document.getElementById('statsContainer').innerHTML = statsHtml;
+}
+
+function exportToCSV() {
+    const { staff, days, data, year, month } = currentSchedule;
+    if (!staff.length) return alert("請先產生更表");
+
+    let csvContent = "\ufeff"; // UTF-8 BOM 確保 Excel 不會亂碼
+    // Header
+    let header = "員工/日期,";
+    for (let d = 1; d <= days; d++) header += `${month}/${d},`;
+    csvContent += header + "\n";
+
+    // Rows
+    staff.forEach(s => {
+        let row = `${s},`;
+        for (let d = 1; d <= days; d++) row += `${data[s][d]},`;
+        csvContent += row + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `更表_${year}_${month}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+</script>
+</body>
+</html>
