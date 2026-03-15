@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>醫護/辦公室自動排更系統 (員工1-10)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --d2-bg: #e3f2fd; --d2-text: #0d47a1;
+            --d7-bg: #f3e5f5; --d7-text: #4a148c;
+            --call-bg: #fff3e0; --call-text: #e65100;
+            --holiday-bg: #fff0f0;
+        }
+
+        body { font-family: 'PingFang HK', 'Microsoft JhengHei', sans-serif; background: #f0f2f5; margin: 20px; }
+        .container { max-width: 1400px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        
+        h2 { text-align: center; color: var(--primary); margin-bottom: 20px; }
+
+        .toolbar { display: flex; flex-wrap: wrap; gap: 10px; background: #f8f9fa; padding: 15px; border-radius: 8px; align-items: center; margin-bottom: 20px; border: 1px solid #eee; }
+        .toolbar input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 80px; }
+        
+        button { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
+        .btn-init { background: #6c757d; color: white; }
+        .btn-gen { background: #28a745; color: white; font-size: 1.1em; }
+        .btn-clear { background: #dc3545; color: white; }
+        .btn-excel { background: #ffc107; color: #212529; }
+        button:hover { opacity: 0.9; transform: translateY(-1px); }
+
+        .table-container { overflow-x: auto; border: 1px solid #dee2e6; border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; background: white; table-layout: fixed; }
+        th, td { border: 1px solid #dee2e6; padding: 6px 2px; text-align: center; width: 40px; }
+        th { background: #f8f9fa; font-size: 12px; height: 40px; }
+        .staff-col { width: 100px; font-weight: bold; background: #f1f3f5 !important; }
+
+        .cell-input { width: 90%; height: 30px; border: 1px solid transparent; text-align: center; font-weight: bold; font-size: 13px; border-radius: 4px; cursor: pointer; }
+        .cell-input:hover { border-color: #ccc; }
+        .cell-input:focus { background: white !important; outline: 2px solid var(--accent); color: black !important; }
+
+        /* Duty Styles */
+        .d-D2 { background-color: var(--d2-bg) !important; color: var(--d2-text); }
+        .d-D7 { background-color: var(--d7-bg) !important; color: var(--d7-text); }
+        .d-C, .d-C1, .d-C2 { background-color: var(--call-bg) !important; color: var(--call-text); border: 1px solid #fbd38d !important; }
+        .d-OFF { background-color: #343a40 !important; color: white; }
+        .d-NC { background-color: #e9ecef !important; color: #adb5bd; }
+        .is-holiday { background-color: var(--holiday-bg); color: #e74c3c; }
+
+        .legend { display: flex; justify-content: center; gap: 15px; margin-bottom: 15px; font-size: 13px; }
+        .legend span { display: flex; align-items: center; gap: 5px; }
+        .box { width: 15px; height: 15px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🗓️ 員工排更工具</h2>
+
+    <div class="toolbar">
+        <div>
+            年份: <input type="number" id="year" value="2024">
+            月份: <input type="number" id="month" value="10" min="1" max="12">
+            <button class="btn-init" onclick="initTable()">1. 設定日期</button>
+        </div>
+        <button class="btn-gen" onclick="autoGenerate()">2. 自動生成更表</button>
+        <button class="btn-clear" onclick="resetNC()">清除所有 NC</button>
+        <button class="btn-excel" onclick="exportToExcel()">匯出 Excel</button>
+    </div>
+
+    <div class="legend">
+        <span><div class="box" style="background:var(--d2-bg)"></div> D2</span>
+        <span><div class="box" style="background:var(--d7-bg)"></div> D7</span>
+        <span><div class="box" style="background:var(--call-bg)"></div> Call (C/C1/C2)</span>
+        <span><b>OFF</b> = 放假 | <b>NC</b> = 不排 Call | <b>C/C1/C2</b> = 預設 Call</span>
+    </div>
+
+    <div class="table-container">
+        <table id="mainTable">
+            <thead id="thead"></thead>
+            <tbody id="tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const staffNames = Array.from({length: 10}, (_, i) => `員工${i+1}`);
+    const holidays = ["2024-01-01", "2024-02-10", "2024-02-11", "2024-02-12", "2024-02-13", "2024-03-29", "2024-03-30", "2024-04-01", "2024-04-04", "2024-05-01", "2024-05-15", "2024-06-10", "2024-07-01", "2024-09-19", "2024-10-01", "2024-10-11", "2024-12-25", "2024-12-26", "2025-01-01", "2025-01-29", "2025-01-30", "2025-01-31"];
+
+    function isHoliday(y, m, d) {
+        const date = new Date(y, m - 1, d);
+        const dateStr = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        return date.getDay() === 0 || date.getDay() === 6 || holidays.includes(dateStr);
+    }
+
+    function initTable() {
+        const y = document.getElementById('year').value;
+        const m = document.getElementById('month').value;
+        const days = new Date(y, m, 0).getDate();
+        
+        let thead = `<tr><th class="staff-col">員工</th>`;
+        for(let d=1; d<=days; d++) {
+            const dayName = ["日","一","二","三","四","五","六"][new Date(y, m-1, d).getDay()];
+            const hClass = isHoliday(y, m, d) ? 'is-holiday' : '';
+            thead += `<th class="${hClass}">${d}<br>${dayName}</th>`;
+        }
+        thead += `</tr>`;
+        document.getElementById('thead').innerHTML = thead;
+
+        let tbody = '';
+        staffNames.forEach(name => {
+            tbody += `<tr><td class="staff-col">${name}</td>`;
+            for(let d=1; d<=days; d++) {
+                tbody += `<td><input type="text" class="cell-input" data-staff="${name}" data-day="${d}" onchange="refreshStyle(this)"></td>`;
+            }
+            tbody += `</tr>`;
+        });
+        document.getElementById('tbody').innerHTML = tbody;
+    }
+
+    function refreshStyle(el) {
+        el.className = 'cell-input';
+        const val = el.value.toUpperCase();
+        if(['D2','D7','C','C1','C2','OFF','NC'].includes(val)) el.classList.add('d-' + val);
+    }
+
+    function resetNC() {
+        document.querySelectorAll('.cell-input').forEach(input => {
+            if(input.value.toUpperCase() === 'NC') { input.value = ''; refreshStyle(input); }
+        });
+    }
+
+    function autoGenerate() {
+        const y = parseInt(document.getElementById('year').value);
+        const m = parseInt(document.getElementById('month').value);
+        const days = new Date(y, m, 0).getDate();
+        
+        let schedule = {};
+        let stats = {};
+        staffNames.forEach(s => {
+            stats[s] = { totalCall: 0, d7: 0, tuesThur: 0, lastCall: -10, weCall: 0 };
+        });
+
+        // 讀取手動輸入
+        for(let d=1; d<=days; d++) {
+            schedule[d] = {};
+            staffNames.forEach(s => {
+                const val = document.querySelector(`[data-staff="${s}"][data-day="${d}"]`).value.toUpperCase();
+                if(val) {
+                    schedule[d][s] = val;
+                    if(['C','C1','C2'].includes(val)) {
+                        stats[s].totalCall++;
+                        stats[s].lastCall = d;
+                        const dw = new Date(y, m-1, d).getDay();
+                        if(dw===2 || dw===4) stats[s].tuesThur++;
+                        if(isHoliday(y,m,d)) stats[s].weCall++;
+                    }
+                }
+            });
+        }
+
+        // 開始自動編排
+        for(let d=1; d<=days; d++) {
+            const isWE = isHoliday(y, m, d);
+            const dw = new Date(y, m-1, d).getDay();
+            
+            // 1. 分配 Call
+            let callStaffsNeeded = isWE ? ['C1', 'C2'] : ['C'];
+            callStaffsNeeded.forEach(type => {
+                // 如果當天已手動分配該類型的 Call，跳過
+                if (Object.values(schedule[d]).includes(type)) return;
+
+                let candidates = staffNames.filter(s => 
+                    !schedule[d][s] && 
+                    (d - stats[s].lastCall >= 3) && // 間隔至少3日
+                    (isWE ? stats[s].weCall < 2 : true) // 週末上限2次
+                );
+
+                // 如果滿足不了 3 日間隔，強制放寬（避免壞死）
+                if (candidates.length === 0) {
+                    candidates = staffNames.filter(s => !schedule[d][s]);
+                }
+
+                // 排序：總 Call 少優先 -> 星期二四 Call 少優先 -> 隨機
+                candidates.sort((a, b) => 
+                    (stats[a].totalCall - stats[b].totalCall) || 
+                    (stats[a].tuesThur - stats[b].tuesThur) ||
+                    (Math.random() - 0.5)
+                );
+
+                if (candidates.length > 0) {
+                    const picked = candidates[0];
+                    schedule[d][picked] = type;
+                    stats[picked].totalCall++;
+                    stats[picked].lastCall = d;
+                    if(dw===2 || dw===4) stats[picked].tuesThur++;
+                    if(isWE) stats[picked].weCall++;
+                }
+            });
+
+            // 2. 分配 D7 (平日需要 4 個)
+            const d7Target = isWE ? 0 : 4;
+            let currentD7 = staffNames.filter(s => schedule[d][s] === 'D7').length;
+            
+            let d7Candidates = staffNames.filter(s => !schedule[d][s] || schedule[d][s] === 'NC');
+            d7Candidates.sort((a,b) => (stats[a].d7 - stats[b].d7) || (Math.random() - 0.5));
+
+            while(currentD7 < d7Target && d7Candidates.length > 0) {
+                const s = d7Candidates.shift();
+                schedule[d][s] = 'D7';
+                stats[s].d7++;
+                currentD7++;
+            }
+
+            // 3. 剩下全部填 D2
+            staffNames.forEach(s => {
+                if(!schedule[d][s] || schedule[d][s] === 'NC') {
+                    schedule[d][s] = 'D2';
+                }
+            });
+        }
+
+        // 寫回表格
+        staffNames.forEach(s => {
+            for(let d=1; d<=days; d++) {
+                const input = document.querySelector(`[data-staff="${s}"][data-day="${d}"]`);
+                input.value = schedule[d][s];
+                refreshStyle(input);
+            }
+        });
+        alert("更表已自動平衡完成！");
+    }
+
+    function exportToExcel() {
+        const table = document.getElementById("mainTable");
+        const wb = XLSX.utils.table_to_book(table);
+        XLSX.writeFile(wb, `更表_${document.getElementById('year').value}_${document.getElementById('month').value}.xlsx`);
+    }
+
+    window.onload = initTable;
+</script>
+
+</body>
+</html>
