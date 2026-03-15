@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>醫護排更系統 (全新動態穩定版)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50; --accent: #3498db;
+            --d2: #e3f2fd; --d2-txt: #0d47a1;
+            --d7: #f3e5f5; --d7-txt: #4a148c;
+            --call: #fff3e0; --call-txt: #e65100;
+            --o-bg: #f5f5f5; --o-txt: #9e9e9e;
+            --hol-bg: #ffebee;
+        }
+        body { font-family: 'Microsoft JhengHei', sans-serif; background: #eaeff1; padding: 20px; color: #333; }
+        .box { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        h2 { margin-top: 0; color: var(--primary); }
+        
+        .row { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
+        input[type="text"], input[type="number"] { padding: 8px; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 9px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        button:hover { opacity: 0.8; }
+        .btn-add { background: var(--accent); }
+        .btn-gen { background: #27ae60; font-size: 1.1em; }
+        .btn-export { background: #e67e22; }
+        .btn-clear { background: #95a5a6; }
+
+        .staff-tags { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; }
+        .tag { background: var(--primary); color: white; padding: 5px 12px; border-radius: 20px; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+        .tag span { cursor: pointer; color: #ff7675; font-weight: bold; }
+
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: center; }
+        th, td { border: 1px solid #ddd; padding: 4px; min-width: 40px; height: 35px; }
+        th { background: #f1f3f5; font-size: 12px; }
+        .col-staff { width: 90px; font-weight: bold; background: #fafafa; position: sticky; left: 0; }
+        .is-holiday { background: var(--hol-bg) !important; color: #d32f2f; }
+        
+        .cell-input { width: 100%; height: 100%; border: none; text-align: center; font-weight: bold; text-transform: uppercase; outline: none; background: transparent; }
+        
+        .d-D2 { background: var(--d2) !important; color: var(--d2-txt); }
+        .d-D7 { background: var(--d7) !important; color: var(--d7-txt); }
+        .d-C, .d-C1, .d-C2 { background: var(--call) !important; color: var(--call-txt); border: 1px solid #ff9800 !important; }
+        .d-O { background: var(--o-bg) !important; color: var(--o-txt); }
+
+        .summary-table th { background: var(--primary); color: white; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2>🏥 醫護排更系統</h2>
+    
+    <div class="row">
+        <b>1. 設定年月：</b>
+        <input type="number" id="year" value="2024" style="width: 80px;"> 年
+        <input type="number" id="month" value="12" min="1" max="12" style="width: 60px;"> 月
+    </div>
+
+    <div class="row">
+        <b>2. 管理人手 (自由增減)：</b>
+        <input type="text" id="newStaff" placeholder="輸入同事名" style="width: 120px;">
+        <button class="btn-add" onclick="addStaff()">＋ 加入</button>
+    </div>
+    
+    <div class="staff-tags" id="staffTags">
+        </div>
+
+    <div class="row" style="margin-top: 20px;">
+        <button class="btn-clear" onclick="buildTable()">3. 生成/重置空白表格</button>
+        <button class="btn-gen" onclick="autoSchedule()">4. 🤖 自動編排 (平衡D7 & 按假減Call)</button>
+        <button class="btn-export" onclick="exportToExcel()">📥 匯出 Excel (保證有字)</button>
+    </div>
+</div>
+
+<div class="box table-wrap">
+    <table id="rosterTable">
+        <thead id="rHead"></thead>
+        <tbody id="rBody"></tbody>
+    </table>
+</div>
+
+<div class="box">
+    <h3>📊 本月統計總數</h3>
+    <div class="table-wrap">
+        <table class="summary-table">
+            <thead>
+                <tr>
+                    <th>同事</th><th>D2</th><th style="background:#8e44ad">D7 (應接近)</th>
+                    <th>C</th><th>C1</th><th>C2</th><th>O (放假)</th><th style="background:#e67e22">總 Call 數</th>
+                </tr>
+            </thead>
+            <tbody id="sBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // 預設 8 名員工 (可隨意刪除/增加)
+    let staffList = ["同事A", "同事B", "同事C", "同事D", "同事E", "同事F", "同事G", "同事H"];
+    
+    // 香港公眾假期 (2024-2026)
+    const hkHolidays = [
+        "2024-01-01","2024-02-10","2024-02-12","2024-02-13","2024-03-29","2024-03-30","2024-04-01","2024-04-04","2024-05-01","2024-05-15","2024-06-10","2024-07-01","2024-09-18","2024-10-01","2024-10-11","2024-12-25","2024-12-26",
+        "2025-01-01","2025-01-29","2025-01-30","2025-01-31","2025-04-04","2025-04-18","2025-04-19","2025-04-21","2025-05-01","2025-05-05","2025-05-31","2025-07-01","2025-10-01","2025-10-07","2025-10-29","2025-12-25","2025-12-26",
+        "2026-01-01","2026-02-17","2026-02-18","2026-02-19","2026-04-03","2026-04-04","2026-04-05","2026-04-06","2026-05-01","2026-05-24","2026-06-19","2026-07-01","2026-09-26","2026-10-01","2026-10-19","2026-12-25","2026-12-26"
+    ];
+
+    function isHoliday(y, m, d) {
+        let dateStr = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        let day = new Date(y, m-1, d).getDay();
+        return day === 0 || day === 6 || hkHolidays.includes(dateStr);
+    }
+
+    // --- 員工管理邏輯 ---
+    function renderStaff() {
+        const container = document.getElementById('staffTags');
+        container.innerHTML = staffList.map(s => 
+            `<div class="tag">${s} <span onclick="removeStaff('${s}')">✕</span></div>`
+        ).join('');
+    }
+
+    function addStaff() {
+        const name = document.getElementById('newStaff').value.trim();
+        if(name && !staffList.includes(name)) {
+            staffList.push(name);
+            document.getElementById('newStaff').value = '';
+            renderStaff();
+        }
+    }
+
+    function removeStaff(name) {
+        staffList = staffList.filter(s => s !== name);
+        renderStaff();
+    }
+
+    // --- 表格生成 ---
+    function buildTable() {
+        if(staffList.length === 0) return alert("請至少加入一名同事！");
+        const y = document.getElementById('year').value;
+        const m = document.getElementById('month').value;
+        const days = new Date(y, m, 0).getDate();
+        
+        let headHtml = `<tr><th class="col-staff">同事</th>`;
+        for(let d=1; d<=days; d++) {
+            let holClass = isHoliday(y, m, d) ? 'is-holiday' : '';
+            let dayName = ["日","一","二","三","四","五","六"][new Date(y, m-1, d).getDay()];
+            headHtml += `<th class="${holClass}">${d}<br>${dayName}</th>`;
+        }
+        headHtml += `</tr>`;
+        document.getElementById('rHead').innerHTML = headHtml;
+
+        let bodyHtml = '';
+        staffList.forEach(s => {
+            bodyHtml += `<tr><td class="col-staff">${s}</td>`;
+            for(let d=1; d<=days; d++) {
+                bodyHtml += `<td><input type="text" class="cell-input" id="cell-${s}-${d}" oninput="updateStats()"></td>`;
+            }
+            bodyHtml += `</tr>`;
+        });
+        document.getElementById('rBody').innerHTML = bodyHtml;
+        updateStats();
+    }
+
+    function setCell(s, d, val) {
+        let cell = document.getElementById(`cell-${s}-${d}`);
+        if(cell) {
+            cell.value = val;
+            cell.className = 'cell-input ' + (val ? `d-${val}` : '');
+        }
+    }
+
+    function getCell(s, d) {
+        let cell = document.getElementById(`cell-${s}-${d}`);
+        return cell ? cell.value.toUpperCase() : '';
+    }
+
+    // --- 核心排更邏輯 ---
+    function autoSchedule() {
+        if(document.getElementById('rBody').innerHTML === '') buildTable();
+        
+        const y = document.getElementById('year').value;
+        const m = document.getElementById('month').value;
+        const days = new Date(y, m, 0).getDate();
+        
+        let stats = {};
+        // 1. 初始化統計與計算平日假權重
+        staffList.forEach(s => {
+            let weekdayO = 0;
+            for(let d=1; d<=days; d++) {
+                if(getCell(s, d) === 'O' && !isHoliday(y, m, d)) weekdayO++;
+            }
+            // 每請一日平日假，權重+0.8，令佢排 Call 優先級降低
+            stats[s] = { calls: 0, d7: 0, lastCall: -99, weight: weekdayO * 0.8 };
+        });
+
+        // 2. 逐日排更
+        for(let d=1; d<=days; d++) {
+            let isH = isHoliday(y, m, d);
+            let scheduleToday = {};
+
+            // A. 排 Call (假日 C1,C2 / 平日 C)
+            let callsNeeded = isH ? ['C1', 'C2'] : ['C'];
+            callsNeeded.forEach(type => {
+                let pool = staffList.filter(s => getCell(s, d) !== 'O' && !scheduleToday[s] && (d - stats[s].lastCall >= 3));
+                if(pool.length === 0) pool = staffList.filter(s => getCell(s, d) !== 'O' && !scheduleToday[s]); // 放寬要求
+                
+                // 按 (已出Call數 + 假期權重) 排序，最少嘅優先
+                pool.sort((a,b) => (stats[a].calls + stats[a].weight) - (stats[b].calls + stats[b].weight) || Math.random() - 0.5);
+                
+                if(pool.length > 0) {
+                    let picked = pool[0];
+                    scheduleToday[picked] = type;
+                    stats[picked].calls++;
+                    stats[picked].lastCall = d;
+                }
+            });
+
+            // B. 排 D7 (平日限定 4 人)
+            if(!isH) {
+                let d7Pool = staffList.filter(s => getCell(s, d) !== 'O' && !scheduleToday[s]);
+                // 嚴格按當前 D7 總數排序，確保公平
+                d7Pool.sort((a,b) => stats[a].d7 - stats[b].d7 || Math.random() - 0.5);
+                
+                for(let i=0; i<4 && i<d7Pool.length; i++) {
+                    let picked = d7Pool[i];
+                    scheduleToday[picked] = 'D7';
+                    stats[picked].d7++;
+                }
+            }
+
+            // C. 寫入表格 (剩下的填 D2 或 O)
+            staffList.forEach(s => {
+                if(getCell(s, d) === 'O') {
+                    setCell(s, d, 'O'); // 保留手動輸入的 O
+                } else if(scheduleToday[s]) {
+                    setCell(s, d, scheduleToday[s]);
+                } else if(isH) {
+                    setCell(s, d, 'O'); // 假日其他人放假
+                } else {
+                    setCell(s, d, 'D2'); // 平日其他人返 D2
+                }
+            });
+        }
+        updateStats();
+    }
+
+    // --- 統計更新 ---
+    function updateStats() {
+        const days = new Date(document.getElementById('year').value, document.getElementById('month').value, 0).getDate();
+        let html = '';
+        
+        staffList.forEach(s => {
+            let c = {D2:0, D7:0, C:0, C1:0, C2:0, O:0};
+            for(let d=1; d<=days; d++) {
+                let val = getCell(s, d);
+                if(c[val] !== undefined) c[val]++;
+                setCell(s, d, val); // 觸發顏色更新
+            }
+            let totalC = c.C + c.C1 + c.C2;
+            html += `<tr>
+                <td><b>${s}</b></td><td>${c.D2}</td><td style="font-weight:bold;color:#8e44ad">${c.D7}</td>
+                <td>${c.C}</td><td>${c.C1}</td><td>${c.C2}</td><td>${c.O}</td>
+                <td style="font-weight:bold;color:#e67e22">${totalC}</td>
+            </tr>`;
+        });
+        document.getElementById('sBody').innerHTML = html;
+    }
+
+    // --- Excel 匯出 (徹底修復版) ---
+    function exportToExcel() {
+        const y = document.getElementById('year').value;
+        const m = document.getElementById('month').value;
+        const days = new Date(y, m, 0).getDate();
+        
+        // 構建純文字二維陣列 (保證 Excel 讀到)
+        let data = [];
+        
+        // 標題行
+        let header = ["同事"];
+        for(let d=1; d<=days; d++) header.push(`${d}日`);
+        data.push(header);
+
+        // 內容行
+        staffList.forEach(s => {
+            let row = [s];
+            for(let d=1; d<=days; d++) {
+                row.push(getCell(s, d)); // 直接讀取 input 裡面的值
+            }
+            data.push(row);
+        });
+
+        // 轉換並下載
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "更表");
+        XLSX.writeFile(wb, `醫護更表_${y}年${m}月.xlsx`);
+    }
+
+    // 初始化頁面
+    renderStaff();
+    buildTable();
+</script>
+</body>
+</html>
